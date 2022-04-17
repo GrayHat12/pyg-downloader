@@ -1,0 +1,9 @@
+\env
+.idea
+\logs
+\cache
+*.pyc
+*.pem
+*.json
+.env
+\__pycache__
