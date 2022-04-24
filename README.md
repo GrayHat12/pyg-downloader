@@ -19,3 +19,5 @@ Manager supports the following options:
 * URL (required) : The URL of the file to download.
 * max_connections (optional) : The maximum number of parallel connections to use. Default is 4. Maximum allowed is 8.
 * show_progress (optional) : Whether to show a progress bar. Default is True.
+* destination_path (optional): The path to save the file to. Default is the current working directory.
+* filename (optional): The name of the file to save the file to. Default is the file name of the URL.

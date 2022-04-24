@@ -10,19 +10,23 @@ from src.downloader import Downloader
 
 
 class Manager:
-    def __init__(self, url: str, max_connections: int = 4, show_progress = True):
+    def __init__(self, url: str, max_connections: int = 4, show_progress=True, destination_path: str = './', filename: Union[str, None] = None):
         self.download_url = url
         self.number_of_connections = min(max_connections, 8)
         self.uuids = []
-        self.filename = None
+        self.filename = filename
         self.filesize = None
         self.filetype = None
+        self.destination_path = destination_path or './'
+        if not self.destination_path.endswith('/'):
+            self.destination_path += '/'
         if not show_progress:
             disable()
 
     def get_meta(self):
         response = requests.head(self.download_url)
-        self.filename = self.download_url.split('/')[-1]
+        if not self.filename:
+            self.filename = self.download_url.split('/')[-1]
         self.filesize = int(response.headers['Content-Length'])
         self.filetype = response.headers.get('Content-Type', None)
 
@@ -44,11 +48,12 @@ class Manager:
             self.uuids.append(uid)
             name = f"Part {i} of {self.filename}"
             parts.append(
-                threading.Thread(target=self.single_download, args=(uid, start_range, end_range, name), name=name)
+                threading.Thread(target=self.single_download, args=(
+                    uid, start_range, end_range, name), name=name)
             )
-            if isinstance(end_range,int):
+            if isinstance(end_range, int):
                 start_range = end_range + 1
-        
+
         # start all threads
         for part in parts:
             part.start()
@@ -58,24 +63,27 @@ class Manager:
             part.join()
         flush()
 
-        with open(self.filename, 'wb+') as f:
+        filepath = f"{self.destination_path}{self.filename}"
+
+        with open(filepath, 'wb+') as f:
             f.write(b'')
 
         for uid in self.uuids:
             filename = f"{uid}-{self.filename}.part"
-            with open(filename, 'rb') as src_file:
-                with open(self.filename, 'ab') as dest_file:
+            src_path = f"{self.destination_path}{filename}"
+            with open(src_path, 'rb') as src_file:
+                with open(filepath, 'ab') as dest_file:
                     dest_file.write(src_file.read())
-            os.remove(os.path.join(os.getcwd(), filename))
+            os.remove(src_path)
 
     def log_progress(self, uid: str, progress: int):
         print(f"{uid} - {progress}%")
 
     def single_download(self, uid: str, range_from: int, range_to: Union[str, int], name: str):
         filename = f"{uid}-{self.filename}.part"
+        filepath = f"{self.destination_path}{filename}"
         download_range = f"bytes={range_from}-{range_to}"
         with Downloader(self.download_url, filename, download_range) as downloader:
-            with open(filename, 'ab+') as f:
+            with open(filepath, 'ab+') as f:
                 for chunk, progress in atpbar(downloader, name=name):
                     f.write(chunk)
-    
