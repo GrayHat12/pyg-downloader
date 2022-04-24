@@ -4,12 +4,11 @@ import requests
 
 
 class Downloader(object):
-    def __init__(self, url: str, filename: str, download_range: str):
+    def __init__(self, url: str, download_range: str):
         """
         Range: bytes=0-100
         """
         self.download_url = url
-        self.filename = filename
         self.range = download_range
         self.chunk_size = 1024
         self.total_size, self.length, self.response = self.__create_connection()
