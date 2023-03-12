@@ -4,16 +4,16 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="file-downloader",
+    name="pyg-downloader",
     version="0.0.1",
     author="GrayHat12",
     author_email="grayhathacks10@gmail.com",
     description="python download manager",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/GrayHat12/File-Downloader",
+    url="https://github.com/GrayHat12/download-manager",
     project_urls={
-        "Bug Tracker": "https://github.com/GrayHat12/File-Downloader/issues",
+        "Bug Tracker": "https://github.com/GrayHat12/pyg-downloader/issues",
     },
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -21,7 +21,7 @@ setuptools.setup(
         "Operating System :: OS Independent",
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',
-        'Topic :: Software Development :: Download Manager',
+        'Topic :: Software Development',
     ],
     keywords="download manager downloader file downloader",
     package_dir={"": "src"},

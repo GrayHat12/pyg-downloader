@@ -1,4 +1,4 @@
-# file-downloader
+# pyg-downloader
 
 Uses multiple parallel connections to download a file.
 
@@ -11,11 +11,11 @@ pytest
 
 ### Install
 ```bash
-pip install file-downloader
+pip install pyg-downloader
 ```
 **OR** if you want to show progress
 ```bash
-pip install file-downloader[atpbar]
+pip install pyg-downloader[atpbar]
 ```
 
 ### To Download to disk
