@@ -1,7 +1,7 @@
 import os
 from io import BytesIO
 
-from download_manager import DownloadManager
+from pyg_manager import DownloadManager
 
 
 def test_manager():

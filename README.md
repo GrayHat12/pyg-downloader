@@ -7,9 +7,7 @@ Uses multiple parallel connections to download a file.
 pytest
 ```
 
-## Usage
-
-### Install
+## Install
 ```bash
 pip install pyg-downloader
 ```
@@ -18,9 +16,16 @@ pip install pyg-downloader
 pip install pyg-downloader[atpbar]
 ```
 
+## Usage
+
+### CLI
+```bash
+pyg-downloader https://download.samplelib.com/mp4/sample-15s.mp4 -o test.mp4 --max-connections 8 --progress
+```
+
 ### To Download to disk
 ```py
-from download_manager import DownloadManager
+from pyg_download_manager import DownloadManager
 
 manager = DownloadManager(max_connections=8, show_progress=True)
 
@@ -32,7 +37,7 @@ path = manager.download("https://download.samplelib.com/mp4/sample-15s.mp4", des
 
 ### To Download to memory
 ```py
-from download_manager import DownloadManager
+from pyg_download_manager import DownloadManager
 
 manager = DownloadManager(max_connections=8, show_progress=True)
 

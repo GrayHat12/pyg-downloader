@@ -7,21 +7,16 @@ from typing import Iterable, List, Optional, Union
 import requests
 
 try:
+    HAS_ATPBAR = True
     from atpbar import atpbar, disable, flush
 except ImportError as e:
-    import warnings
-
-    def empty_function(*args, **kwargs):
-        warnings.warn(
-            "You need to install atpbar to use 'show_progress' feature.")
+    HAS_ATPBAR = False
 
     def atpbar(iterable: Iterable, *args, **kwargs):
         for i in iterable:
-            yield i, 0
-    disable = empty_function
-    flush = empty_function
+            yield i
 
-from downloader import Downloader
+from pyg_downloader import Downloader
 
 
 class DownloadManager:
@@ -34,7 +29,8 @@ class DownloadManager:
         self.__number_of_connections = min(max(max_connections, 1), 8)
 
         if not show_progress:
-            disable()
+            if HAS_ATPBAR:
+                disable()
 
     def __get_meta(self, url: str):
         response = requests.head(url)
@@ -85,7 +81,8 @@ class DownloadManager:
         for part in parts:
             part.join()
 
-        flush()
+        if HAS_ATPBAR:
+            flush()
         return os.path.abspath(f"{destination_path}{filename}")
 
     def get(self, url: str, task_name: Optional[str] = None):
@@ -125,7 +122,8 @@ class DownloadManager:
         for part in parts:
             part.join()
 
-        flush()
+        if HAS_ATPBAR:
+            flush()
         return data
 
     def __disk_download(self, download_url: str, filepath: str, range_from: int, range_to: Union[str, int], name: str):
