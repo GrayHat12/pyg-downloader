@@ -1,12 +1,12 @@
-from src.manager import Manager
+import sys
 
+sys.path.append('./src')
 
-def tester():
-    URL = "https://download.samplelib.com/mp4/sample-15s.mp4"
+from download_manager import DownloadManager
 
-    manager = Manager(URL, destination_path='./src', filename='asdf.mp4')
+manager = DownloadManager(max_connections=8, show_progress=True)
 
-    manager.start_download()
-
-
-tester()
+# Download to current working directory and returns the path to the file
+# destination_path is the path to the folder for download
+# filename is the name of the file to save to. Default is the filename from url.
+path = manager.download("https://download.samplelib.com/mp4/sample-15s.mp4", destination_path='./', filename=None)

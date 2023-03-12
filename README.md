@@ -1,23 +1,42 @@
-# Basic File Downloader
+# file-downloader
 
 Uses multiple parallel connections to download a file.
 
-## Usage
-```py
-from src.manager import Manager
-
-URL = "https://download.samplelib.com/mp4/sample-15s.mp4"
-
-manager = Manager(URL)
-
-manager.start_download()
-
+## Testing
+```bash
+pytest
 ```
 
-## Options
-Manager supports the following options:
-* URL (required) : The URL of the file to download.
-* max_connections (optional) : The maximum number of parallel connections to use. Default is 4. Maximum allowed is 8.
-* show_progress (optional) : Whether to show a progress bar. Default is True.
-* destination_path (optional): The path to save the file to. Default is the current working directory.
-* filename (optional): The name of the file to save the file to. Default is the file name of the URL.
+## Usage
+
+### Install
+```bash
+pip install file-downloader
+```
+**OR** if you want to show progress
+```bash
+pip install file-downloader[atpbar]
+```
+
+### To Download to disk
+```py
+from download_manager import DownloadManager
+
+manager = DownloadManager(max_connections=8, show_progress=True)
+
+# Download to disk and returns the path to the file
+# destination_path is the path to the folder for download
+# filename is the name of the file to save to. Default is the filename from url.
+path = manager.download("https://download.samplelib.com/mp4/sample-15s.mp4", destination_path='./', filename=None)
+```
+
+### To Download to memory
+```py
+from download_manager import DownloadManager
+
+manager = DownloadManager(max_connections=8, show_progress=True)
+
+# Download data to an BytesIO object and returns the object
+# task_name is used to log progress. Default is the filename from url.
+data = manager.get("https://download.samplelib.com/mp4/sample-15s.mp4", task_name='Test Task')
+```
