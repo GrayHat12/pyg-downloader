@@ -27,7 +27,7 @@ setuptools.setup(
     package_dir={"": "src"},
     packages=setuptools.find_packages(where="src"),
     python_requires=">=3.6",
-    install_requires=['requests>=2.28.2'],
+    install_requires=['aiohttp[speedups]>=3.8.5', 'aiofiles>=23.2.1'],
     extras_require={
         'atpbar': ['atpbar>=1.1.4']
     },

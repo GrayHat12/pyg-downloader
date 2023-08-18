@@ -1,144 +1,216 @@
+import asyncio
 import os
-import threading
-from io import BytesIO
-from math import ceil
-from typing import Iterable, List, Optional, Union
+from dataclasses import dataclass
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
+from uuid import uuid4
 
-import requests
+import aiofiles
+from aiohttp import ClientSession
+from aiohttp.client import _RequestContextManager
 
-try:
-    HAS_ATPBAR = True
-    from atpbar import atpbar, disable, flush
-except ImportError as e:
-    HAS_ATPBAR = False
+from utils import deduceFileName, determine_ranges
 
-    def atpbar(iterable: Iterable, *args, **kwargs):
-        for i in iterable:
-            yield i
 
-from pyg_downloader import Downloader
+@dataclass
+class ChildDownloadTask:
+    id: str
+    url: str
+    destination_directory: str
+    filename: str
+    parent_id: str
+    part_size: int
+    downloaded_size: int
+    response: _RequestContextManager
+    range: Optional[str] = None
+    total_size: Optional[int] = None
+    completed: bool = False
 
 
 class DownloadManager:
 
-    def __init__(self, max_connections: int = 4, show_progress: bool = False):
+    def __init__(
+            self, 
+            max_connections: int = 4, 
+            allow_redirects: bool = True, 
+            show_progress: bool = False, 
+            on_progress: Optional[Callable[[str, List[Tuple[int, int]]], None]] = None, 
+            on_completion: Optional[Callable[[str], None]] = None, 
+            on_error: Optional[Callable[[str, Exception], None]] = None,
+            on_filename: Optional[Callable[[str, str], None]] = None,
+            on_total_size: Optional[Callable[[str, Optional[int]], None]] = None,
+        ):
         if not isinstance(max_connections, int):
             raise TypeError("max_connections must be an integer")
         if not isinstance(show_progress, bool):
             raise TypeError("show_progress must be a boolean")
         self.__number_of_connections = min(max(max_connections, 1), 8)
+        self.__allow_redirects = allow_redirects
+        self.__show_progress = show_progress
+        self.__download_queue: Dict[str, ChildDownloadTask] = {}
+        self.__session = ClientSession()
+        self.__on_progress = on_progress
+        self.__on_error = on_error
+        self.__on_completion = on_completion
+        self.__on_filename = on_filename
+        self.__on_total_size = on_total_size
 
-        if not show_progress:
-            if HAS_ATPBAR:
-                disable()
+    async def await_downloads(self):
+        tasks: List[Coroutine[Any, Any, None]] = []
+        done_parents: List[str] = []
+        for item in self.__download_queue.keys():
+            tasks.append(self.await_download(item))
+            if item not in done_parents:
+                if self.__on_filename:
+                    self.__on_filename(self.__download_queue[item].parent_id, self.__download_queue[item].filename)
+                if self.__on_total_size:
+                    self.__on_total_size(self.__download_queue[item].parent_id, self.__download_queue[item].total_size)
+                done_parents.append(item)
+        return await asyncio.gather(*tasks)
 
-    def __get_meta(self, url: str):
-        response = requests.head(url)
-        filesize = int(response.headers['Content-Length'])
-        filetype = response.headers.get('Content-Type', None)
-        return filesize, filetype
+    async def await_download(self, id: str):
+        try:
+            item = self.__download_queue.get(id, None)
+            if not item:
+                return
+            if not isinstance(item, ChildDownloadTask):
+                return
+            filepath = os.path.join(item.destination_directory, item.filename)
+            if not os.path.exists(filepath):
+                async with aiofiles.open(filepath, mode='wb+') as file:
+                    if item.total_size:
+                        await file.write(b'\0' * item.total_size)
 
-    def download(self, url: str, destination_path: str = './', filename: Optional[str] = None):
-        """
-        Download data to disk. Return full filepath
-        """
+            async with aiofiles.open(filepath, mode='wb') as file:
+                if item.range:
+                    start_range = int(item.range[len('bytes='):].split('-')[0])
+                    await file.seek(start_range)
+                async with item.response as response:
+                    async for chunk in response.content.iter_chunked(1024):
+                        item = self.__download_queue.get(id, None)
+                        if item:
+                            item.downloaded_size += len(chunk)
+                        self.__download_queue[id] = item
+                        await file.write(chunk)
+                        self.onProgress(id)
+                self.onCompletion(id)
+        except Exception as e:
+            self.onError(id, e)
 
-        if not isinstance(url, str):
-            raise TypeError("url must be a string")
+    def onError(self, id: str, error: Exception):
+        item = self.__download_queue.pop(id, None)
+        if not item:
+            return
+        if isinstance(item, ChildDownloadTask):
+            id = item.parent_id
+            if item.response and not item.response.close:
+                item.response.close()
+            other_children = [child for child in self.__download_queue.values(
+            ) if isinstance(child, ChildDownloadTask) and child.parent_id == id]
+            for child in other_children:
+                _item = self.__download_queue.pop(child.id, None)
+                if _item.response and not _item.response.close:
+                    _item.response.close()
+        if self.__on_error:
+            self.__on_error(id, error)
 
-        destination_path = destination_path or './'
-        if not destination_path.endswith('/'):
-            destination_path += '/'
+    def onProgress(self, id: str):
+        item = self.__download_queue.get(id, None)
+        if not item:
+            return
+        all_childs = [child for child in self.__download_queue.values() if isinstance(
+            child, ChildDownloadTask) and child.parent_id == item.parent_id]
+        parallel_progress = [(child.downloaded_size, child.part_size)
+                             for child in all_childs]
+        if self.__on_progress:
+            self.__on_progress(item.parent_id, parallel_progress)
 
+    def onCompletion(self, id: str):
+        item = self.__download_queue.get(id, None)
+        if not item:
+            return
+        self.__download_queue[id].completed = True
+        if item.response and not item.response.close:
+            item.response.close()
+        all_childs = [child for child in self.__download_queue.values() if isinstance(
+            child, ChildDownloadTask) and child.parent_id == item.parent_id]
+        if all([child.completed for child in all_childs]):
+            if self.__on_completion:
+                self.__on_completion(item.parent_id)
+            # pop all childs
+            for child in all_childs:
+                self.__download_queue.pop(child.id, None)
+        else:
+            pass
+            # print('Not all childs completed for', item.filename)
+
+    async def add_download_task(self, url: str, destination_directory: str = './', filename: Optional[str] = None):
+        task_id = uuid4().hex
+        headers = {}
+        real_url = url
+        try:
+            async with self.__session.head(url, allow_redirects=self.__allow_redirects) as response:
+                headers = response.headers
+                real_url = response.real_url.human_repr()
+                response.close()
+        except Exception as e:
+            # print('Error', e)
+            pass
         if not filename:
-            filename = url.split('/')[-1]
+            filename = deduceFileName(real_url, headers)
+        if not filename:
+            raise Exception("Could not deduce filename")
+        ranges, filesize = determine_ranges(
+            real_url, headers, self.__number_of_connections)
+        # else:
+        #     ranges = []
+        #     filesize = None
+        child_tasks: List[ChildDownloadTask] = []
+        if not ranges:
+            child_tasks.append(ChildDownloadTask(
+                id=uuid4().hex,
+                url=url,
+                destination_directory=destination_directory,
+                filename=filename,
+                parent_id=task_id,
+                part_size=0,
+                downloaded_size=0,
+                response=self.__session.get(
+                    url, allow_redirects=self.__allow_redirects),
+                range=None,
+                total_size=None,
+                completed=False
+            ))
+        else:
+            for range in ranges:
+                child_tasks.append(ChildDownloadTask(
+                    id=uuid4().hex,
+                    url=url,
+                    destination_directory=destination_directory,
+                    filename=filename,
+                    parent_id=task_id,
+                    part_size=0,
+                    downloaded_size=0,
+                    response=self.__session.get(
+                        url, allow_redirects=self.__allow_redirects, headers={'Range': range}),
+                    range=range,
+                    completed=False,
+                    total_size=filesize
+                ))
+        for child in child_tasks:
+            self.__download_queue[child.id] = child
+        return task_id
 
-        filesize, filetype = self.__get_meta(url)
+    def __enter__(self):
+        return self
 
-        if not filename or not filesize:
-            raise Exception('Failed to fetch meta data')
+    async def __aenter__(self):
+        return self
 
-        with open(f"{destination_path}{filename}", 'wb+') as f:
-            f.write(b'0'*filesize)
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
 
-        start_range = 0
-        part_size = ceil(filesize / self.__number_of_connections)
-        parts: List[threading.Thread] = []
+    async def close(self):
+        await self.__session.close()
 
-        for i in range(1, self.__number_of_connections+1):
-            end_range = start_range + part_size
-            if i == self.__number_of_connections:
-                end_range = ""
-            name = f"Part {i} of {filename}"
-            thread = threading.Thread(target=self.__disk_download, args=(
-                url, f"{destination_path}{filename}", start_range, end_range, name), name=name)
-            thread.start()
-            parts.append(thread)
-            if isinstance(end_range, int):
-                start_range = end_range + 1
-
-        # join all threads
-        for part in parts:
-            part.join()
-
-        if HAS_ATPBAR:
-            flush()
-        return os.path.abspath(f"{destination_path}{filename}")
-
-    def get(self, url: str, task_name: Optional[str] = None):
-        """
-        Download data in memory and return it as a BytesIO object
-        """
-
-        if not isinstance(url, str):
-            raise TypeError("url must be a string")
-
-        if not task_name or not isinstance(task_name, str):
-            task_name = url.split('/')[-1]
-
-        filesize, filetype = self.__get_meta(url)
-
-        if not filesize:
-            raise Exception('Failed to fetch meta data')
-        data = BytesIO(b'0' * filesize)
-
-        start_range = 0
-        part_size = ceil(filesize / self.__number_of_connections)
-        parts: List[threading.Thread] = []
-
-        for i in range(1, self.__number_of_connections+1):
-            end_range = start_range + part_size
-            if i == self.__number_of_connections:
-                end_range = ""
-            name = f"Part {i} of {task_name}"
-            thread = threading.Thread(target=self.__object_download, args=(
-                url, data, start_range, end_range, name), name=name)
-            thread.start()
-            parts.append(thread)
-            if isinstance(end_range, int):
-                start_range = end_range + 1
-
-        # join all threads
-        for part in parts:
-            part.join()
-
-        if HAS_ATPBAR:
-            flush()
-        return data
-
-    def __disk_download(self, download_url: str, filepath: str, range_from: int, range_to: Union[str, int], name: str):
-        download_range = f"bytes={range_from}-{range_to}"
-        current_pos = range_from
-        with Downloader(download_url, download_range) as downloader:
-            with open(filepath, 'r+b') as f:
-                f.seek(current_pos)
-                for chunk, progress in atpbar(downloader, name=name):
-                    f.write(chunk)
-
-    def __object_download(self, download_url: str, object: BytesIO, range_from: int, range_to: Union[str, int], name: str):
-        download_range = f"bytes={range_from}-{range_to}"
-        current_pos = range_from
-        with Downloader(download_url, download_range) as downloader:
-            object.seek(current_pos)
-            for chunk, progress in atpbar(downloader, name=name):
-                object.write(chunk)
+    async def __exit__(self, exc_type, exc_val, exc_tb):
+        await self.close()

@@ -1,3 +1,4 @@
-requests
-atpbar
 pytest
+aiohttp[speedups]
+aiofiles
+tqdm
